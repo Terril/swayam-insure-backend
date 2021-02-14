@@ -8,7 +8,16 @@ import (
     "encoding/json"
 
 	"github.com/gorilla/mux"
+	"bytes"
+	"database/sql"
+	"os"
+
+	"google.golang.org/appengine"
+
+	_ "github.com/go-sql-driver/mysql"
 )
+
+var db *sql.DB
 
 func homeLink(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Welcome home!")
@@ -22,6 +31,21 @@ func main() {
 	router.HandleFunc("/events/{id}", getOneEvent).Methods("GET")
 	router.HandleFunc("/events/{id}", updateEvent).Methods("POST")
 	router.HandleFunc("/events/{id}", deleteEvent).Methods("DELETE")
+
+	// var (
+	// 	connectionName = mustGetenv("CLOUDSQL_CONNECTION_NAME")
+	// 	user           = mustGetenv("CLOUDSQL_USER")
+	// 	password       = os.Getenv("CLOUDSQL_PASSWORD") // NOTE: password may be empty
+	// )
+
+	var err error
+	db, err = sql.Open("mysql", fmt.Sprintf("%s:%s@cloudsql(%s)/", "root", "SwayamInsure@123", "swayam-insure:asia-south1:swayam-insure"))
+	if err != nil {
+		log.Fatalf("Could not open db: %v", err)
+	}
+
+	http.HandleFunc("/", handler)
+	appengine.Main()
 	log.Fatal(http.ListenAndServe(":8080", router))
 }
 
@@ -99,4 +123,39 @@ func deleteEvent(w http.ResponseWriter, r *http.Request) {
 			fmt.Fprintf(w, "The event with ID %v has been deleted successfully", eventID)
 		}
 	}
+}
+
+func handler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain")
+
+	rows, err := db.Query("SHOW DATABASES")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Could not query db: %v", err), 500)
+		return
+	}
+	defer rows.Close()
+
+	buf := bytes.NewBufferString("Databases:\n")
+	for rows.Next() {
+		var dbName string
+		if err := rows.Scan(&dbName); err != nil {
+			http.Error(w, fmt.Sprintf("Could not scan result: %v", err), 500)
+			return
+		}
+		fmt.Fprintf(buf, "- %s\n", dbName)
+	}
+	w.Write(buf.Bytes())
+}
+
+func mustGetenv(k string) string {
+	v := os.Getenv(k)
+	if v == "" {
+		log.Panicf("%s environment variable not set.", k)
+	}
+	return v
 }
